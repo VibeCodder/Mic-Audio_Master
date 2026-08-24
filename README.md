@@ -1,6 +1,6 @@
 # Mic-Audio_Master
 A handful app to globally control both microphones and audio on your PC.
-<br>
+<br><br>
 Please install before use:
 ```
 pip install PySide6 pycaw comtypes
