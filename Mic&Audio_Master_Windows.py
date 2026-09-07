@@ -43,7 +43,7 @@ import sys
 import ctypes
 import subprocess
 
-from PySide6.QtCore import Qt, QByteArray, QSize
+from PySide6.QtCore import Qt, QByteArray, QSize, QSettings
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -74,6 +74,11 @@ except ImportError as _e:
 eRender, eCapture, eAll = 0, 1, 2
 eConsole, eMultimedia, eCommunications = 0, 1, 2
 DEVICE_STATE_ACTIVE = 0x1
+
+# Persistent storage for "last known volume level before zeroing", saved
+# under the current Windows user (HKEY_CURRENT_USER\Software\...) so it
+# survives closing and reopening the app.
+SETTINGS = QSettings("GlobalAudioDeviceControl", "GlobalAudioDeviceControl")
 
 
 def is_admin() -> bool:
@@ -385,18 +390,21 @@ QTabBar::tab:hover:!selected {{
 # ---------------------------------------------------------------------
 class AudioControlPanel(QWidget):
     def __init__(self, flow: int, device_word: str, all_label: str,
-                 icon_on: str, icon_off: str, parent=None):
+                 icon_on: str, icon_off: str, settings_key: str, parent=None):
         """
         flow: eCapture or eRender
         device_word: "microphone" / "audio device" - used in dialog text
         all_label: text for the "apply to all" checkbox
         icon_on / icon_off: SVG templates for the big toggle button
+        settings_key: unique key ("mic" / "audio") used to persist the last
+                      volume level for this tab under SETTINGS
         """
         super().__init__(parent)
         self._device_word = device_word
         self._all_label = all_label
         self._icon_on = icon_on
         self._icon_off = icon_off
+        self._settings_key = settings_key
 
         if not PYCAW_AVAILABLE:
             layout = QVBoxLayout(self)
@@ -498,7 +506,14 @@ class AudioControlPanel(QWidget):
         self.gain_label.setObjectName("subtext")
         gain_col.addWidget(self.gain_label)
 
-        self._last_gain_value = 100  # remembers the level to restore after zeroing
+        # remembers the level to restore after zeroing; loaded from disk/
+        # registry so it survives closing and reopening the app
+        saved_value = SETTINGS.value(f"{self._settings_key}/last_gain", 100)
+        try:
+            saved_value = int(saved_value)
+        except (TypeError, ValueError):
+            saved_value = 100
+        self._last_gain_value = max(1, min(100, saved_value))
 
         self.zero_btn = QPushButton()
         self.zero_btn.setObjectName("zeroBtn")
@@ -602,7 +617,7 @@ class AudioControlPanel(QWidget):
         self.gain_slider.blockSignals(False)
 
         if gain_pct > 0:
-            self._last_gain_value = gain_pct
+            self._save_last_gain_value(gain_pct)
         self.zero_btn.blockSignals(True)
         self.zero_btn.setChecked(gain_pct == 0)
         self.zero_btn.blockSignals(False)
@@ -663,7 +678,7 @@ class AudioControlPanel(QWidget):
         # keep the zero-toggle button in sync whether the slider was moved
         # by hand or by the zero button itself
         if value > 0:
-            self._last_gain_value = value
+            self._save_last_gain_value(value)
             if self.zero_btn.isChecked():
                 self.zero_btn.blockSignals(True)
                 self.zero_btn.setChecked(False)
@@ -688,12 +703,19 @@ class AudioControlPanel(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Error", str(e))
 
+    def _save_last_gain_value(self, value: int):
+        """Remembers `value` in memory and writes it to persistent storage
+        so it's still there the next time the app is started."""
+        self._last_gain_value = value
+        SETTINGS.setValue(f"{self._settings_key}/last_gain", value)
+        SETTINGS.sync()
+
     def _on_zero_clicked(self, checked):
         """Toggles the slider between 0 and its last remembered value."""
         self._update_zero_button_style(checked)
         if checked:
             if self.gain_slider.value() > 0:
-                self._last_gain_value = self.gain_slider.value()
+                self._save_last_gain_value(self.gain_slider.value())
             self.gain_slider.setValue(0)
         else:
             restore = self._last_gain_value if self._last_gain_value > 0 else 100
@@ -801,6 +823,7 @@ class MainWindow(QWidget):
             all_label="Set for all microphones",
             icon_on=_MIC_ON_SVG,
             icon_off=_MIC_OFF_SVG,
+            settings_key="mic",
         )
         audio_panel = AudioControlPanel(
             flow=eRender,
@@ -808,6 +831,7 @@ class MainWindow(QWidget):
             all_label="Set for all audio devices",
             icon_on=_SPEAKER_ON_SVG,
             icon_off=_SPEAKER_OFF_SVG,
+            settings_key="audio",
         )
 
         tabs.addTab(mic_panel, "Microphone")
