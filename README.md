@@ -6,7 +6,9 @@ Please install before use:
 pip install PySide6 pycaw comtypes
 ```
 
-<img width="527" height="803" alt="image" src="https://github.com/user-attachments/assets/baf1ec56-6341-475a-b91b-118954ad1c74" />
+<img width="527" height="819" alt="image" src="https://github.com/user-attachments/assets/7a86c698-bb37-4df1-a652-31fb0117d356" />
+
 <br>
 <br>
-<img width="527" height="803" alt="image" src="https://github.com/user-attachments/assets/0434f0ae-0801-48bd-ba0d-8f7a552c0bd9" />
+<img width="527" height="819" alt="image" src="https://github.com/user-attachments/assets/9e126bfb-8fed-4b18-bf15-3f8f2d7f319f" />
+
