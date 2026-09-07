@@ -43,7 +43,7 @@ import sys
 import ctypes
 import subprocess
 
-from PySide6.QtCore import Qt, QByteArray
+from PySide6.QtCore import Qt, QByteArray, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -312,6 +312,18 @@ QPushButton#relaunch {{
 QPushButton#relaunch:hover {{
     background-color: #253854;
 }}
+QPushButton#zeroBtn {{
+    background-color: #1c2c47;
+    border: 1px solid #253854;
+    border-radius: 8px;
+}}
+QPushButton#zeroBtn:hover {{
+    background-color: #253854;
+}}
+QPushButton#zeroBtn:checked {{
+    background-color: {DANGER};
+    border: 1px solid {DANGER};
+}}
 QPushButton#disableBtn {{
     background-color: #1c2c47;
     color: {TEXT};
@@ -486,11 +498,27 @@ class AudioControlPanel(QWidget):
         self.gain_label.setObjectName("subtext")
         gain_col.addWidget(self.gain_label)
 
+        self._last_gain_value = 100  # remembers the level to restore after zeroing
+
+        self.zero_btn = QPushButton()
+        self.zero_btn.setObjectName("zeroBtn")
+        self.zero_btn.setCheckable(True)
+        self.zero_btn.setFixedSize(32, 32)
+        self.zero_btn.setCursor(Qt.PointingHandCursor)
+        self.zero_btn.setIconSize(QSize(16, 16))
+        self.zero_btn.setToolTip(f"Set {self._device_word} level to 0 / restore")
+        self.zero_btn.clicked.connect(self._on_zero_clicked)
+
         self.gain_slider = QSlider(Qt.Horizontal)
         self.gain_slider.setRange(0, 100)
         self.gain_slider.setValue(100)
         self.gain_slider.valueChanged.connect(self._on_gain_changed)
-        gain_col.addWidget(self.gain_slider)
+
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(10)
+        slider_row.addWidget(self.zero_btn)
+        slider_row.addWidget(self.gain_slider)
+        gain_col.addLayout(slider_row)
         card_layout.addLayout(gain_col)
 
         self.disable_btn = QPushButton()
@@ -517,6 +545,7 @@ class AudioControlPanel(QWidget):
         outer.addStretch()
 
         self._update_mute_button_style(muted=False)
+        self._update_zero_button_style(active=False)
 
     def _populate_devices(self):
         self.device_combo.blockSignals(True)
@@ -566,10 +595,18 @@ class AudioControlPanel(QWidget):
         self.mute_btn.blockSignals(False)
         self._update_mute_button_style(muted)
 
+        gain_pct = int(gain * 100)
         self.gain_slider.blockSignals(True)
-        self.gain_slider.setValue(int(gain * 100))
-        self.gain_label.setText(f"Sensitivity / volume: {int(gain * 100)}%")
+        self.gain_slider.setValue(gain_pct)
+        self.gain_label.setText(f"Sensitivity / volume: {gain_pct}%")
         self.gain_slider.blockSignals(False)
+
+        if gain_pct > 0:
+            self._last_gain_value = gain_pct
+        self.zero_btn.blockSignals(True)
+        self.zero_btn.setChecked(gain_pct == 0)
+        self.zero_btn.blockSignals(False)
+        self._update_zero_button_style(gain_pct == 0)
 
         self.disable_btn.blockSignals(True)
         self.disable_btn.setChecked(False)
@@ -623,6 +660,22 @@ class AudioControlPanel(QWidget):
     def _on_gain_changed(self, value):
         self.gain_label.setText(f"Sensitivity / volume: {value}%")
 
+        # keep the zero-toggle button in sync whether the slider was moved
+        # by hand or by the zero button itself
+        if value > 0:
+            self._last_gain_value = value
+            if self.zero_btn.isChecked():
+                self.zero_btn.blockSignals(True)
+                self.zero_btn.setChecked(False)
+                self.zero_btn.blockSignals(False)
+                self._update_zero_button_style(False)
+        else:
+            if not self.zero_btn.isChecked():
+                self.zero_btn.blockSignals(True)
+                self.zero_btn.setChecked(True)
+                self.zero_btn.blockSignals(False)
+                self._update_zero_button_style(True)
+
         if self.all_checkbox.isChecked():
             for name, imm_dev in self.all_devices:
                 try:
@@ -634,6 +687,22 @@ class AudioControlPanel(QWidget):
                 self.audio.set_gain(self.current_device, value / 100.0)
             except Exception as e:
                 QMessageBox.warning(self, "Error", str(e))
+
+    def _on_zero_clicked(self, checked):
+        """Toggles the slider between 0 and its last remembered value."""
+        self._update_zero_button_style(checked)
+        if checked:
+            if self.gain_slider.value() > 0:
+                self._last_gain_value = self.gain_slider.value()
+            self.gain_slider.setValue(0)
+        else:
+            restore = self._last_gain_value if self._last_gain_value > 0 else 100
+            self.gain_slider.setValue(restore)
+
+    def _update_zero_button_style(self, active: bool):
+        """Recolors the crossed-out icon for contrast against the button background."""
+        icon_color = "#ffffff" if active else TEXT
+        self.zero_btn.setIcon(svg_icon(self._icon_off, icon_color, 16))
 
     def _on_disable_clicked(self, checked):
         if not self.admin_mode:
